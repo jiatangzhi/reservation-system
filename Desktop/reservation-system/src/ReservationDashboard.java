@@ -5,18 +5,19 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 public class ReservationDashboard {
-    private final ReservationSystem reservationSystem = new ReservationSystem(10); // Example: 10 tables
+    private final ReservationSystem reservationSystem = new ReservationSystem(10);
     private final JTextArea statusArea = new JTextArea();
 
     public void launchUI() {
         JFrame frame = new JFrame("Restaurant Reservation System");
-        frame.setSize(900, 550);
+        frame.setSize(950, 600);
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setLayout(new BorderLayout());
 
-        // Left panel: Table availability per hour
+        // LEFT PANEL: Availability Display
         JPanel leftPanel = new JPanel(new BorderLayout());
         leftPanel.setBorder(BorderFactory.createTitledBorder("Availability per Hour"));
 
@@ -30,7 +31,7 @@ public class ReservationDashboard {
         refreshButton.addActionListener(e -> availabilityArea.setText(getAvailabilityText()));
         leftPanel.add(refreshButton, BorderLayout.SOUTH);
 
-        // Right panel: Controls
+        // RIGHT PANEL: Controls
         JPanel rightPanel = new JPanel();
         rightPanel.setLayout(new BoxLayout(rightPanel, BoxLayout.Y_AXIS));
         rightPanel.setBorder(BorderFactory.createTitledBorder("Reservation Controls"));
@@ -39,14 +40,18 @@ public class ReservationDashboard {
         rightPanel.add(new JLabel("Customer Name:"));
         rightPanel.add(nameField);
 
-        // Hour selector using JComboBox
         JComboBox<String> hourBox = new JComboBox<>();
         LocalDateTime now = LocalDateTime.now().withMinute(0).withSecond(0).withNano(0);
         List<LocalDateTime> hours = new ArrayList<>();
-        for (int i = 0; i < 12; i++) {
-            LocalDateTime time = now.plusHours(i);
-            hours.add(time);
-            hourBox.addItem(time.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
+        LocalDateTime end = now.withHour(22); // Limit to 10 PM
+        if (now.getHour() > 22) {
+            now = now.plusDays(1).withHour(9); // If current hour > 10 PM, start next day at 9 AM
+            end = now.withHour(22);
+        }
+        while (!now.isAfter(end)) {
+            hours.add(now);
+            hourBox.addItem(now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
+            now = now.plusHours(1);
         }
         rightPanel.add(new JLabel("Select Hour:"));
         rightPanel.add(hourBox);
@@ -54,6 +59,7 @@ public class ReservationDashboard {
         JButton reserveBtn = new JButton("Make Reservation");
         JButton checkBtn = new JButton("Check Reservation");
         JButton cancelBtn = new JButton("Cancel Reservation");
+        JButton statsBtn = new JButton("Show Stats");
 
         rightPanel.add(Box.createVerticalStrut(10));
         rightPanel.add(reserveBtn);
@@ -61,13 +67,14 @@ public class ReservationDashboard {
         rightPanel.add(checkBtn);
         rightPanel.add(Box.createVerticalStrut(5));
         rightPanel.add(cancelBtn);
+        rightPanel.add(Box.createVerticalStrut(5));
+        rightPanel.add(statsBtn);
         rightPanel.add(Box.createVerticalStrut(15));
 
-        // Status area to show messages and stats
         statusArea.setEditable(false);
         statusArea.setLineWrap(true);
         JScrollPane statusScroll = new JScrollPane(statusArea);
-        statusScroll.setPreferredSize(new Dimension(250, 140));
+        statusScroll.setPreferredSize(new Dimension(300, 160));
         rightPanel.add(new JLabel("Status Log:"));
         rightPanel.add(statusScroll);
 
@@ -75,11 +82,15 @@ public class ReservationDashboard {
         reserveBtn.addActionListener((ActionEvent e) -> {
             String name = nameField.getText().trim();
             int selectedIndex = hourBox.getSelectedIndex();
+            LocalDateTime selectedHour = hours.get(selectedIndex);
             if (name.isEmpty()) {
                 statusArea.append("Please enter a name.\n");
                 return;
             }
-            LocalDateTime selectedHour = hours.get(selectedIndex);
+            if (selectedHour.isBefore(LocalDateTime.now().withMinute(0).withSecond(0).withNano(0))) {
+                statusArea.append("Cannot reserve for past time.\n");
+                return;
+            }
             boolean reserved = reservationSystem.makeReservation(name, selectedHour);
             statusArea.append("[" + name + "] " +
                     (reserved ? "Reservation successful at " + selectedHour + "\n" : "No tables available.\n"));
@@ -103,21 +114,40 @@ public class ReservationDashboard {
                     (canceled ? "Reservation canceled at " + selectedHour + "\n" : "No reservation to cancel.\n"));
         });
 
-        // Add panels to frame
+        statsBtn.addActionListener((ActionEvent e) -> {
+            Map<LocalDateTime, Integer> stats = reservationSystem.getReservationCounts();
+            statusArea.append("Reservation Summary:\n");
+            stats.entrySet().stream()
+                    .sorted(Map.Entry.comparingByKey())
+                    .forEach(entry -> statusArea.append(entry.getKey().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+                            + " - Reservations: " + entry.getValue() + "\n"));
+        });
+
         frame.add(leftPanel, BorderLayout.CENTER);
         frame.add(rightPanel, BorderLayout.EAST);
         frame.setVisible(true);
     }
 
-    // Generates availability text for next few hours
     private String getAvailabilityText() {
         StringBuilder builder = new StringBuilder();
         LocalDateTime now = LocalDateTime.now().withMinute(0).withSecond(0).withNano(0);
-        for (int i = 0; i < 12; i++) {
-            LocalDateTime slot = now.plusHours(i);
+        LocalDateTime end = now.withHour(22);
+        if (now.getHour() > 22) {
+            now = now.plusDays(1).withHour(9);
+            end = now.withHour(22);
+        }
+        while (!now.isAfter(end)) {
+            LocalDateTime slot = now;
             int freeTables = reservationSystem.getFreeTables(slot);
             builder.append(slot.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")))
-                   .append(" - Available tables: ").append(freeTables).append("\n");
+                    .append(" - Available tables: ").append(freeTables);
+            if (freeTables == 0) {
+                builder.append(" ❌");
+            } else if (freeTables < 10) {
+                builder.append(" ✅");
+            }
+            builder.append("\n");
+            now = now.plusHours(1);
         }
         return builder.toString();
     }
@@ -125,4 +155,4 @@ public class ReservationDashboard {
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> new ReservationDashboard().launchUI());
     }
-} 
+}
